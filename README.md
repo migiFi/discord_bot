@@ -1,2 +1,5 @@
-# discord_bot
-A fun bot for my discord server.
+# TurtleBot
+
+This is `Discord bot is` a ongoing project for my discord server.
+
+More information coming soon...
