@@ -1,5 +1,4 @@
-import discord
-import asyncio
+import discord, asyncio
 from discord.ext import commands
 from youtubesearchpython import VideosSearch
 from yt_dlp import YoutubeDL
@@ -22,51 +21,52 @@ class music_bot(commands.Cog):
         }
         self.FFMPEG_OPTIONS = {'options': '-vn'}
 
-        self.voiceChannel = None
+        self.vc = None
         self.ytdl = YoutubeDL(self.YDL_OPTIONS)
 
-    def youtube_search(self, item):
+    def search_yt(self, item):
         if item.startswith("https://"):
             title = self.ytdl.extract_info(item, download=False)["title"]
             return{'source':item, 'title':title}
         search = VideosSearch(item, limit=1)
         return{'source':search.result()["result"][0]["link"],
                 'title':search.result()["result"][0]["title"]}
-
+        
     async def play_next(self):
         if len(self.music_queue) > 0:
             self.is_playing = True
-
-            music_url = self.music_queue[0][0]['source']
-
+            
+            m_url = self.music_queue[0][0]['source']
+            
             self.music_queue.pop(0)
             loop = asyncio.get_event_loop()
-            data = await loop.run_in_executor(None, lambda: self.ytdl.extract_info(music_url, download=False))
+            data = await loop.run_in_executor(None, lambda: self.ytdl.extract_info(m_url, download=False))
             song = data['url']
-            self.voiceChannel.play(discord.FFmpegPCMAudio(song, **self.FFMPEG_OPTIONS),
-                          after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
+            self.vc.play(discord.FFmpegPCMAudio(song, **self.FFMPEG_OPTIONS), 
+                         after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
         else:
             self.is_playing = False
 
-    async def to_play(self, ctx):
+    async def play_music(self, ctx):
         if len(self.music_queue) > 0:
             self.is_playing = True
 
-            music_url = self.music_queue[0][0]['source']
-            if self.voiceChannel == None or not self.voiceChannel.is_connected():
-                self.voiceChannel = await self.music_queue[0][1].connect()
+            m_url = self.music_queue[0][0]['source']
+            if self.vc == None or not self.vc.is_connected():
+                self.vc = await self.music_queue[0][1].connect()
 
-                if self.voiceChannel == None:
-                    await ctx.send("-->> I cannot to connect to the channel :neutral_face: <<--")
+                if self.vc == None:
+                    await ctx.send("```Could not connect to the channel```")
                     return
             else:
-                await self.voiceChannel.move_to(self.music_queue[0][1])
+                await self.vc.move_to(self.music_queue[0][1])
+
             self.music_queue.pop(0)
             loop = asyncio.get_event_loop()
-            data = await loop.run_in_executor(None, lambda: self.ytdl.extract_info(music_url, download=False))
+            data = await loop.run_in_executor(None, lambda: self.ytdl.extract_info(m_url, download=False))
             song = data['url']
-            self.voiceChannel.play(discord.FFmpegPCMAudio(song, **self.FFMPEG_OPTIONS),
-                          after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
+            self.vc.play(discord.FFmpegPCMAudio(song, **self.FFMPEG_OPTIONS), 
+                         after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
 
         else:
             self.is_playing = False
@@ -77,74 +77,75 @@ class music_bot(commands.Cog):
         try:
             voice_channel = ctx.author.voice.channel
         except:
-            await ctx.send("-->> You need to connect to a voice channel first! <<--")
+            await ctx.send("```Please connect to a voice channel first!```")
             return
         if self.is_paused:
-            self.voiceChannel.to_resume()
+            self.vc.resume()
         else:
-            song = self.youtube_search(query)
+            song = self.search_yt(query)
             if type(song) == type(True):
-                await ctx.send("-->> Download failed: issues with the playlist or wrong format. Try a different keyword. <<--")
+                await ctx.send("``` Download failed: issues with the playlist or wrong format. Try a different keyword.```")
             else:
                 if self.is_playing:
                     await ctx.send(f"**#{len(self.music_queue)+2} -'{song['title']}'** was added to the queue")  
                 else:
-                    await ctx.send(f"**'{song['title']}'** was added to the queue!:notes: ")  
+                    await ctx.send(f"**'{song['title']}'** was added to the queue")  
                 self.music_queue.append([song, voice_channel])
                 if self.is_playing == False:
-                    await self.to_play(ctx)
+                    await self.play_music(ctx)
 
-    @commands.command(name="to_pause")
-    async def to_pause(self, ctx, *args):
+    @commands.command(name="pause")
+    async def pause(self, ctx, *args):
         if self.is_playing:
             self.is_playing = False
             self.is_paused = True
-            self.voiceChannel.to_pause()
+            self.vc.pause()
         elif self.is_paused:
             self.is_paused = False
             self.is_playing = True
-            self.voiceChannel.to_resume()
+            self.vc.resume()
 
-    @commands.command(name = "to_resume", aliases=["r"])
-    async def to_resume(self, ctx, *args):
+    @commands.command(name = "resume", aliases=["r"])
+    async def resume(self, ctx, *args):
         if self.is_paused:
             self.is_paused = False
             self.is_playing = True
-            self.voiceChannel.to_resume()
+            self.vc.resume()
 
-    @commands.command(name="to_skip", aliases=["s"])
-    async def to_skip(self, ctx):
-        if self.voiceChannel != None and self.voiceChannel:
-            self.voiceChannel.stop()
-            # tries to play next in for_queue
-            await self.to_play(ctx)
+    @commands.command(name="skip", aliases=["s"])
+    async def skip(self, ctx):
+        if self.vc != None and self.vc:
+            self.vc.stop()
+            await self.play_music(ctx)
 
 
-    @commands.command(name="for_queue", aliases=["q"])
-    async def for_queue(self, ctx):
+    @commands.command(name="queue", aliases=["q"])
+    async def queue(self, ctx):
         retval = ""
         for i in range(0, len(self.music_queue)):
             retval += f"#{i+1} -" + self.music_queue[i][0]['title'] + "\n"
 
         if retval != "":
-            await ctx.send(f"-->> Next in the queue:\n{retval}")
+            await ctx.send(f"```Next in the queue:\n{retval}```")
         else:
-            await ctx.send("-->> Nothing in the queue, feel free to add a song.:wink:")
+            await ctx.send("```Nothing in the queue, feel free to add a song.```")
 
-    @commands.command(name="clear_queue", aliases=["c"])
-    async def clear_queue(self, ctx):
-        if self.voiceChannel != None and self.is_playing:
-            self.voiceChannel.stop()
+    @commands.command(name="clear", aliases=["c"])
+    async def clear(self, ctx):
+        if self.vc != None and self.is_playing:
+            self.vc.stop()
         self.music_queue = []
-        await ctx.send("-->> Queued music cleared <<--")
+        await ctx.send("```Queued music cleared```")
 
-    @commands.command(name="stop", aliases=["dc"])
-    async def disconnect_bot(self, ctx):
+    @commands.command(name="stop")
+    async def disconnect(self, ctx):
         self.is_playing = False
         self.is_paused = False
-        await self.voiceChannel.disconnect()
+        if self.vc:
+            await self.vc.disconnect()
+        self.vc = None
     
-    @commands.command(name="remove", aliases=["rm"])
+    @commands.command(name="remove")
     async def remove_last_song(self, ctx):
         self.music_queue.pop()
-        await ctx.send("-->> Last song was removed <<--")
+        await ctx.send("```Last song was removed```")
